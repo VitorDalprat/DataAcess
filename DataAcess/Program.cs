@@ -2,6 +2,7 @@
 using Dapper;
 using DataAcess.Models;
 using System.Data;
+using System.Net.WebSockets;
 
 const string connectionString = "TrustServerCertificate=True;Server=localhost,1433;Database=balta;User ID=sa;Password=1q2w3e4r@#$";
 
@@ -13,7 +14,13 @@ using (var connection = new SqlConnection(connectionString)) //Váriavel criada 
     //CreateManyCategory(connection);
     //ExecuteProcedure(connection);
     //ExecuteReadProcedure(connection);
-    ExecuteScalar(connection);
+    //ExecuteScalar(connection);
+    //ReadView(connection);
+    //OneToOne(connection);
+    //QueryMultiple(connection);
+    //SelectIn(connection);
+    //Like(connection);
+    Transaction(connection);
 }
 
 static void ListCategories(SqlConnection connection)
@@ -95,7 +102,7 @@ static void ExecuteReadProcedure(SqlConnection connection)
     }
 }
 
-static void ExecuteScalar(SqlConnection connection)
+static void ExecuteScalar(SqlConnection connection) //Unica Diferença é que nao passamos o Id
 {
     var category3 = new Category();
     category3.Title = "PARPICO";
@@ -104,9 +111,93 @@ static void ExecuteScalar(SqlConnection connection)
     category3.Order = 10;
     category3.Summary = "Verpico";
     category3.Featured = false;
-    var insertSql = "INSERT INTO [Category] VALUES (NEWID(), @Title, @Url, @Summary, @Order, @Description, @Featured)";
+    var insertSql = "INSERT INTO [Category] OUTPUT INSERTED.[Id] VALUES (NEWID(), @Title, @Url, @Summary, @Order, @Description, @Featured)";
 
-    var rows = connection.Execute(insertSql, new {category3.Title, category3.Url, category3.Summary, category3.Order, category3.Description, category3.Featured });
-    Console.WriteLine("Linhas Inseridas: " + rows);
+    var id = connection.ExecuteScalar<Guid>(insertSql, new {category3.Title, category3.Url, category3.Summary, category3.Order, category3.Description, category3.Featured });
+    Console.WriteLine("A Categoria Inserida Foi: " + id);
 }
 
+static void ReadView(SqlConnection connection)   //VIEW
+{
+    var views = connection.Query("SELECT * FROM [vwCourses]");
+    foreach (var item in views)
+    {
+        Console.WriteLine($"{item.Id} - {item.Title}");
+    }
+}
+
+static void OneToOne(SqlConnection connection)  //INNER JOIN
+{
+    var onetoone = connection.Query<CareerItem, Course, CareerItem>("SELECT * FROM [careerItem] INNER JOIN [Course] ON [CareerItem].[CourseId] = [Course].[Id]",
+        (CareerItem, Course) => { CareerItem.Course = Course; return CareerItem;}, splitOn: "Id" );
+    foreach (var item in onetoone)
+    {
+        Console.WriteLine($"{item.Title} - Curso: {item.Course.Title}");
+    }
+}
+
+static void QueryMultiple(SqlConnection connection)  //Mais de um Select
+{
+    var querys = "SELECT * FROM [Category]; SELECT * FROM [Course]";
+
+    using (var multi = connection.QueryMultiple(querys))
+    {
+        var categories = multi.Read<Category>();
+        var courses = multi.Read<Course>();
+
+        foreach(var item in categories)
+        {
+            Console.WriteLine(item.Title);
+        }
+        foreach (var item in courses)
+        {
+            Console.WriteLine(item.Title);
+        }
+    }
+}
+
+static void SelectIn(SqlConnection connection)
+{
+    var query = "SELECT * FROM [Career] WHERE [DurationInMinutes] IN (678, 786)";
+    var items = connection.Query<Career>(query);
+
+    foreach(var item in items)
+    {
+        Console.WriteLine(item.Title);
+    }
+}
+
+static void Like(SqlConnection connection)
+{
+    var like = "SELECT * FROM [Course] WHERE [Title] LIKE @exp ";
+    var items = connection.Query<Course>(like, new {exp = "%backend%" });
+
+    foreach (var item in items)
+    {
+        Console.WriteLine(item.Title);
+    }
+}
+
+static void Transaction(SqlConnection connection)
+{
+    var category = new Category();
+    category.Id = Guid.NewGuid();
+    category.Title = "Minha Categoria";
+    category.Url = "minha";
+    category.Description = "nao quero salvar";
+    category.Order = 11;
+    category.Summary = "not salve";
+    category.Featured = false;
+    var insertSql = "INSERT INTO [Category] VALUES (@Id, @Title, @Url, @Summary, @Order, @Description, @Featured)";
+
+    connection.Open();
+
+    using (var transaction = connection.BeginTransaction())
+    {
+        var rows = connection.Execute(insertSql, new { category.Id, category.Title, category.Url, category.Summary, category.Order, category.Description, category.Featured }, transaction);
+
+        transaction.Commit();
+        Console.WriteLine("Linhas Inseridas: " + rows);
+    }
+
+}
